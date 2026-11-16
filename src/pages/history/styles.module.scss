@@ -49,6 +49,17 @@
   background-color: $backgroundActive;
 }
 
+.historyStatus {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 8px;
+  color: $colorTextSecondary;
+  font-size: $fontSizeSm;
+  line-height: 1.4;
+}
+
 .chartContainer {
   position: relative;
   flex: 1;
