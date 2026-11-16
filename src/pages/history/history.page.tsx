@@ -8,19 +8,20 @@ import {
   ChartTextColor,
 } from '@shared/models/enums';
 import {useEffect, useState} from 'react';
-import {CandlestickData, SeriesDataItemTypeMap, UTCTimestamp} from 'lightweight-charts';
-import {Legend, Loader} from '@shared/components';
+import {SeriesDataItemTypeMap} from 'lightweight-charts';
+import {Button, Legend, Loader} from '@shared/components';
 
-import {MarketArea, MenuSeries, TimeFrames} from '@pages/history/ui';
+import {MarketArea, MenuSeries, TimeFrames, TradesFeed} from '@pages/history/ui';
 import {TimeFrame} from '@pages/history/models';
-import {getDataSessionStorage, logger, sessionStorageKey, setDataSessionStorage} from '@shared/utils';
-
-const url = 'wss://api-pub.bitfinex.com/ws/2';
+import {classNames, getDataSessionStorage, sessionStorageKey, setDataSessionStorage} from '@shared/utils';
+import {useCandleHistory} from '@pages/history/hooks';
+import {getSecondInterval} from '@pages/history/utils';
 
 type DataForSave = {
   selectedTimeFrame: TimeFrame;
   selectedSeries: keyof SeriesDataItemTypeMap;
   selectedCurrency: CurrencyType;
+  isVolumeVisible: boolean;
 };
 
 /**
@@ -36,11 +37,13 @@ export const HistoryPage = () => {
   const [selectedCurrency, setSelectedCurrency] = useState<CurrencyType>(
     getDataSessionStorage<DataForSave>(sessionStorageKey.chartHistoryPage)?.selectedCurrency ?? 'tBTCUSD',
   );
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isVolumeVisible, setIsVolumeVisible] = useState<boolean>(
+    getDataSessionStorage<DataForSave>(sessionStorageKey.chartHistoryPage)?.isVolumeVisible ?? true,
+  );
 
-  const {ref, mainSeries, legendRef} = useChart({
+  const {ref, chartRef, mainSeries, volumeSeries, legendRef} = useChart({
     backgroundColor: ChartBackgroundColor.DARK,
-    autoSize: false,
+    autoSize: true,
     gridColor: ChartGridColor.SECONDARY,
     textColor: ChartTextColor.LIGHT,
     borderColor: ChartBorderColor.SECONDARY,
@@ -49,122 +52,29 @@ export const HistoryPage = () => {
     typeSeries: selectedSeries,
     hasLegend: true,
     additionalLegendText: `${selectedCurrency} ${selectedTimeFrame}`,
+    isVolumeVisible,
+    volumeUnit: selectedCurrency.slice(1, -3),
+    secondsVisible: getSecondInterval(selectedTimeFrame) !== null,
   });
 
+  const {isLoading, isHistoryLoading, hasHistoryError, hasMoreHistory, retryHistory} = useCandleHistory({
+    selectedCurrency,
+    selectedTimeFrame,
+    selectedSeries,
+    chartRef,
+    mainSeries,
+    volumeSeries,
+  });
+
+  // Сохраняет настройки независимо от состояния соединения
   useEffect(() => {
-    const ws = new WebSocket(url);
-    let heartbeatInterval: NodeJS.Timeout;
-    let heartbeatTimeout: NodeJS.Timeout;
-
-    setIsLoading(true);
-
-    // Отправка ping
-    const sendHeartbeat = () => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({event: 'ping'}));
-      }
-    };
-
-    ws.onopen = () => {
-      ws.send(
-        JSON.stringify({
-          event: 'subscribe',
-          channel: 'candles',
-          key: `trade:${selectedTimeFrame}:${selectedCurrency}`,
-        }),
-      );
-
-      // После установки соединения, сохраняет параметры в локальное хранилище
-      setDataSessionStorage(sessionStorageKey.chartHistoryPage, {
-        selectedTimeFrame,
-        selectedSeries,
-        selectedCurrency,
-      });
-
-      // Устанавливает интервал для heartbeat на 30 секунд
-      heartbeatInterval = setInterval(sendHeartbeat, 30000);
-    };
-
-    ws.onmessage = (msg) => {
-      const response = JSON.parse(msg.data);
-
-      // Если сервер отвечает 'pong', сбрасывает тайм-аут
-      if (response.event === 'pong') {
-        clearTimeout(heartbeatTimeout);
-
-        heartbeatTimeout = setTimeout(() => {
-          // Закрывает соединение, если сервер не отвечает на пинг
-          ws.close();
-        }, 60000); // Ждет 60 секунд ответа
-      }
-
-      /**
-       * Проверяет является ли ответ массивом и что второй элемент не строка 'hb'
-       * @example [160000504, 'hb']
-       */
-      if (Array.isArray(response) && response[1] !== 'hb') {
-        /**
-         * Проверяет является ли ответ массивом массивов или масивом чисел
-         * @example [[16000400, 99666, 95444, ...], [16000400, 99666, 95444, ...], [16000400, 99666, 95444, ...]]
-         * или [16000400, 99666, 95444, ...]
-         */
-        if (!Array.isArray(response[1][0])) {
-          const newCandle: CandlestickData = {
-            time: (response[1][0] / 1000) as UTCTimestamp,
-            open: response[1][1],
-            high: response[1][3],
-            low: response[1][4],
-            close: response[1][2],
-          };
-
-          // Обновляет график при изменении стоимости валюты
-          if (mainSeries.current) {
-            try {
-              mainSeries.current.update(newCandle);
-            } catch (error) {
-              logger.warn('', error);
-              return;
-            }
-          }
-        } else {
-          const candles: CandlestickData[] = response[1]
-            .map((item: number[]) => {
-              const candle: CandlestickData = {
-                time: (item[0] / 1000) as UTCTimestamp,
-                open: item[1],
-                high: item[3],
-                low: item[4],
-                close: item[2],
-              };
-
-              return candle;
-            })
-            .sort((a: CandlestickData<UTCTimestamp>, b: CandlestickData<UTCTimestamp>) => a.time - b.time);
-
-          // Устанавливает данные стоимости валюты при первом рендере
-          if (mainSeries.current) {
-            mainSeries.current.setData(candles);
-            setIsLoading(false);
-          }
-        }
-      }
-    };
-
-    ws.onerror = () => {
-      setIsLoading(false);
-    };
-
-    ws.onclose = () => {
-      clearInterval(heartbeatInterval);
-      clearTimeout(heartbeatTimeout);
-    };
-
-    return () => {
-      ws.close();
-      clearInterval(heartbeatInterval);
-      clearTimeout(heartbeatTimeout);
-    };
-  }, [selectedTimeFrame, selectedSeries, selectedCurrency]);
+    setDataSessionStorage(sessionStorageKey.chartHistoryPage, {
+      selectedTimeFrame,
+      selectedSeries,
+      selectedCurrency,
+      isVolumeVisible,
+    });
+  }, [selectedTimeFrame, selectedSeries, selectedCurrency, isVolumeVisible]);
 
   return (
     <div className={styles.container}>
@@ -179,6 +89,31 @@ export const HistoryPage = () => {
           <span className={styles.hr} />
 
           <MenuSeries selectedSeries={selectedSeries} setSelectedSeries={setSelectedSeries} />
+
+          <span className={styles.hr} />
+
+          <Button
+            type="button"
+            aria-pressed={isVolumeVisible}
+            className={classNames(styles.volumeButton, {[styles.selected]: isVolumeVisible})}
+            onClick={() => setIsVolumeVisible((value) => !value)}>
+            Объём
+          </Button>
+
+          {(isHistoryLoading || hasHistoryError || !hasMoreHistory) && (
+            <span className={styles.historyStatus} role="status">
+              {isHistoryLoading && 'Загружаем историю…'}
+              {hasHistoryError && (
+                <>
+                  Не удалось загрузить историю.
+                  <Button type="button" className={styles.volumeButton} onClick={retryHistory}>
+                    Повторить
+                  </Button>
+                </>
+              )}
+              {!hasMoreHistory && 'Вся доступная история загружена'}
+            </span>
+          )}
         </div>
 
         <div className={styles.chartContainer} ref={ref}>
@@ -190,6 +125,8 @@ export const HistoryPage = () => {
           )}
         </div>
       </div>
+
+      <TradesFeed key={selectedCurrency} selectedCurrency={selectedCurrency} />
     </div>
   );
 };

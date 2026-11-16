@@ -1,0 +1,133 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  color: $colorTextWhite;
+  background-color: $backgroundChart;
+}
+
+.header {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  padding: 14px 12px;
+  border-bottom: 1px solid $colorSecondary;
+}
+
+.title {
+  grid-column: 1 / -1;
+  font-size: $fontSizeS;
+  font-weight: 500;
+}
+
+.pair,
+.status,
+.footer {
+  font-size: $fontSizeSm;
+  color: $colorTextSecondary;
+}
+
+.status {
+  text-align: right;
+}
+
+.live,
+.buy {
+  color: $colorPriceUp;
+}
+
+.sell {
+  color: $colorPriceDown;
+}
+
+.tableContainer {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: $colorSecondary $backgroundChart;
+
+  &:focus-visible {
+    outline: 2px solid $colorTextOrange;
+    outline-offset: -2px;
+  }
+}
+
+.table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: $fontSizeSm;
+  font-variant-numeric: tabular-nums;
+
+  th,
+  td {
+    padding: 10px 8px;
+    text-align: right;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  th {
+    position: sticky;
+    top: 0;
+    background-color: $backgroundChart;
+    color: $colorTextSecondary;
+    font-weight: $fontWeightBase;
+  }
+
+  th:nth-child(1) {
+    width: 28%;
+  }
+  th:nth-child(2) {
+    width: 30%;
+  }
+  th:nth-child(3) {
+    width: 21%;
+  }
+  th:nth-child(4) {
+    width: 21%;
+  }
+
+  tbody tr:hover {
+    background-color: $backgroundActive;
+  }
+}
+
+.empty {
+  padding: 28px 16px;
+  color: $colorTextSecondary;
+  text-align: center;
+  font-size: $fontSizeS;
+  line-height: 1.5;
+}
+
+.error {
+  padding: 12px;
+  font-size: $fontSizeS;
+  line-height: 1.5;
+}
+
+.retryButton {
+  margin-top: 8px;
+  padding: 8px 12px;
+  color: $colorTextWhite;
+  background-color: $backgroundActive;
+
+  &:hover {
+    color: $colorTextOrange;
+  }
+
+  &:focus-visible {
+    outline: 2px solid $colorTextOrange;
+    outline-offset: 2px;
+  }
+}
+
+.footer {
+  padding: 12px;
+  border-top: 1px solid $colorSecondary;
+  line-height: 1.4;
+}

@@ -74,7 +74,7 @@ export const MarketArea = ({selectedCurrency, setSelectedCurrency}: Props) => {
         </Menu>
       </div>
 
-      <span className={styles.selectedCurrencyLabel}>{getItemFromSelectedCurrency('label')}/USDT</span>
+      <span className={styles.selectedCurrencyLabel}>{getItemFromSelectedCurrency('label')}/USD</span>
     </div>
   );
 };

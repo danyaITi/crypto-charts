@@ -1,4 +1,4 @@
-import {createChart, ISeriesApi, SeriesDataItemTypeMap, UTCTimestamp} from 'lightweight-charts';
+import {createChart, IChartApi, ISeriesApi, SeriesDataItemTypeMap, UTCTimestamp} from 'lightweight-charts';
 import {MutableRefObject, useEffect, useRef} from 'react';
 import {
   ChartBackgroundColor,
@@ -11,7 +11,9 @@ import {isOhlcData} from '@shared/utils/type_guards';
 
 type State = {
   ref: MutableRefObject<HTMLDivElement | null>;
+  chartRef: MutableRefObject<IChartApi | null>;
   mainSeries: MutableRefObject<ISeriesApi<keyof SeriesDataItemTypeMap> | null>;
+  volumeSeries: MutableRefObject<ISeriesApi<'Histogram'> | null>;
   legendRef: MutableRefObject<HTMLDivElement | null>;
 };
 
@@ -25,6 +27,9 @@ type Props = {
   downColor: ChartSeriesColor;
   hasLegend: boolean;
   additionalLegendText?: string;
+  isVolumeVisible?: boolean;
+  volumeUnit?: string;
+  secondsVisible?: boolean;
   typeSeries?: keyof SeriesDataItemTypeMap;
 };
 
@@ -41,6 +46,9 @@ type Props = {
  * @param hasLegend {boolean} - показывать ли текст обозначение на графике
  * @param [additionalLegendText] {string} - дополнительный текст в legend
  * @param [typeSeries] {ChartAvailableTypes} - тип графика
+ * @param [isVolumeVisible] {boolean} - показывать ли объём торгов
+ * @param [volumeUnit] {string} - валюта измерения объёма торгов
+ * @param [secondsVisible] {boolean} - показывать ли секунды на шкале времени и в подсказке времени
  * 
  * @example {
     backgroundColor: #000,
@@ -62,10 +70,15 @@ export const useChart = ({
   typeSeries = 'Candlestick',
   hasLegend,
   additionalLegendText,
+  isVolumeVisible = false,
+  volumeUnit = '',
+  secondsVisible = false,
 }: Props): State => {
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
+  const chartRef = useRef<IChartApi | null>(null);
   const legendRef = useRef<HTMLDivElement | null>(null);
   const mainSeries = useRef<ISeriesApi<keyof SeriesDataItemTypeMap> | null>(null);
+  const volumeSeries = useRef<ISeriesApi<'Histogram'> | null>(null);
 
   useEffect(() => {
     const handleResize = () => {
@@ -84,6 +97,7 @@ export const useChart = ({
       },
       autoSize,
     });
+    chartRef.current = chart;
     chart.timeScale().scrollToPosition(5, true);
     chart.timeScale().fitContent();
 
@@ -106,6 +120,7 @@ export const useChart = ({
             year: '2-digit',
             hour: '2-digit',
             minute: '2-digit',
+            ...(secondsVisible ? {second: '2-digit'} : {}),
           };
 
           return new Intl.DateTimeFormat(navigator.language, options).format(date);
@@ -115,6 +130,8 @@ export const useChart = ({
 
     chart.timeScale().applyOptions({
       borderColor,
+      timeVisible: true,
+      secondsVisible,
     });
 
     let series: ISeriesApi<keyof SeriesDataItemTypeMap> | null = null;
@@ -136,6 +153,24 @@ export const useChart = ({
 
     mainSeries.current = series;
 
+    // Объём использует общую шкалу времени и отдельную шкалу значений
+    const volume = chart.addHistogramSeries({
+      priceScaleId: 'volume',
+      priceFormat: {type: 'volume'},
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+
+    volume.priceScale().applyOptions({
+      scaleMargins: {top: 0.8, bottom: 0},
+    });
+    volumeSeries.current = volume;
+
+    const volumeFormatter = Intl.NumberFormat(currentLocale, {maximumFractionDigits: 8});
+
+    // Сбрасывает легенду при смене валюты, таймфрейма или типа графика
+    legendRef.current?.replaceChildren();
+
     // Текст обозначение при наведении на график
     if (hasLegend) {
       chart.subscribeCrosshairMove((param) => {
@@ -150,6 +185,7 @@ export const useChart = ({
 
         if (param.time && series) {
           const data = param.seriesData.get(series);
+          const volumeData = param.seriesData.get(volume);
 
           if (legendRef.current && isOhlcData(data)) {
             const isGreen = data?.close > data.open;
@@ -159,6 +195,11 @@ export const useChart = ({
             priceMin = data.low.toFixed(2);
             priceClose = data.close.toFixed(2);
 
+            const volumeLegend =
+              volumeData && 'value' in volumeData
+                ? `<div data-volume ${volume.options().visible ? '' : 'hidden'}><span>ОБЪЁМ</span> <span>${volumeFormatter.format(volumeData.value)} ${volumeUnit}</span></div>`
+                : '';
+
             legendRef.current.style.color = isGreen ? upColor : downColor;
 
             legendRef.current.innerHTML = `
@@ -167,24 +208,74 @@ export const useChart = ({
             <div><span id='legend'>МАКС</span> <span>${priceMax}</span></div>
             <div><span id='legend'>МИН</span> <span>${priceMin}</span></div>
             <div><span id='legend'>ЗАКР</span> <span>${priceClose}</span></div>
+            ${volumeLegend}
           `;
           }
         }
       });
     }
 
-    window.addEventListener('resize', handleResize);
+    // При autoSize библиотека сама отслеживает размер контейнера через ResizeObserver
+    if (!autoSize) {
+      window.addEventListener('resize', handleResize);
+    }
 
     return () => {
       chart.remove();
+      chartRef.current = null;
+      mainSeries.current = null;
+      volumeSeries.current = null;
 
       window.removeEventListener('resize', handleResize);
     };
-  }, [typeSeries]);
+  }, [
+    backgroundColor,
+    textColor,
+    autoSize,
+    gridColor,
+    borderColor,
+    downColor,
+    upColor,
+    typeSeries,
+    hasLegend,
+    additionalLegendText,
+    volumeUnit,
+    secondsVisible,
+  ]);
+
+  // Переключает объём без пересоздания графика и потери загруженных данных
+  useEffect(() => {
+    volumeSeries.current?.applyOptions({visible: isVolumeVisible});
+    mainSeries.current?.priceScale().applyOptions({
+      scaleMargins: {top: 0.1, bottom: isVolumeVisible ? 0.25 : 0.1},
+    });
+
+    const volumeLegend = legendRef.current?.querySelector<HTMLElement>('[data-volume]');
+
+    if (volumeLegend) {
+      volumeLegend.hidden = !isVolumeVisible;
+    }
+  }, [
+    isVolumeVisible,
+    backgroundColor,
+    textColor,
+    autoSize,
+    gridColor,
+    borderColor,
+    downColor,
+    upColor,
+    typeSeries,
+    hasLegend,
+    additionalLegendText,
+    volumeUnit,
+    secondsVisible,
+  ]);
 
   return {
     ref: chartContainerRef,
+    chartRef,
     mainSeries,
+    volumeSeries,
     legendRef,
   };
 };
