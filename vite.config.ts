@@ -5,13 +5,15 @@ import path from 'path'; // Модуль для работы с путями
 import svgr from 'vite-plugin-svgr'; // Плагин для импорта SVG как React-компонентов
 
 // Публичный REST API не отдаёт CORS-заголовки: браузер обращается к API через тот же сервер, что и приложение
+const bitfinexProxyOptions = {
+  target: 'https://api-pub.bitfinex.com',
+  changeOrigin: true,
+  rewrite: (requestPath: string) => requestPath.replace(/^\/api\/bitfinex/, '/v2'),
+  proxyTimeout: 15000,
+};
 const bitfinexProxy = {
-  '/api/bitfinex/candles/': {
-    target: 'https://api-pub.bitfinex.com',
-    changeOrigin: true,
-    rewrite: (requestPath: string) => requestPath.replace(/^\/api\/bitfinex/, '/v2'),
-    proxyTimeout: 15000,
-  },
+  '/api/bitfinex/candles/': bitfinexProxyOptions,
+  '/api/bitfinex/trades/': bitfinexProxyOptions,
 };
 
 // Конфигурация Vite

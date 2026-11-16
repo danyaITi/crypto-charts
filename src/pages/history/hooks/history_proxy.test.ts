@@ -8,6 +8,7 @@ import {join} from 'node:path';
 import {createServer, preview} from 'vite';
 
 const candles = [[1700000000000, 100, 110, 115, 95, 5]];
+const trades = [[1, 1700000000000, 0.5, 100]];
 
 /**
  * Закрывает HTTP-сервер теста, освобождая порт и соединения
@@ -31,7 +32,7 @@ describe('History API proxy', () => {
     upstream = createHttpServer((request, response) => {
       requests.push(request.url ?? '');
       response.writeHead(200, {'Content-Type': 'application/json'});
-      response.end(JSON.stringify(candles));
+      response.end(JSON.stringify(request.url?.startsWith('/v2/trades/') ? trades : candles));
     });
     await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve));
     upstreamUrl = `http://127.0.0.1:${(upstream.address() as AddressInfo).port}`;
@@ -46,10 +47,15 @@ describe('History API proxy', () => {
     await rmdir(previewDirectory);
   });
 
-  test.each(['dev', 'preview'])(
-    'serves history on the application origin in %s and preserves the API path and cursor',
-    async (mode) => {
-      const proxy = {'/api/bitfinex/candles/': {target: upstreamUrl}};
+  test.each([
+    ['dev', 'candles/trade:1m:tBTCUSD/hist', candles],
+    ['preview', 'candles/trade:1m:tBTCUSD/hist', candles],
+    ['dev', 'trades/tBTCUSD/hist', trades],
+    ['preview', 'trades/tBTCUSD/hist', trades],
+  ])(
+    'serves %s history for %s on the application origin and preserves the cursor',
+    async (mode, endpoint, expected) => {
+      const proxy = {'/api/bitfinex/candles/': {target: upstreamUrl}, '/api/bitfinex/trades/': {target: upstreamUrl}};
       const server =
         mode === 'dev'
           ? await createServer({server: {host: '127.0.0.1', port: 0, proxy, watch: null}})
@@ -62,16 +68,13 @@ describe('History API proxy', () => {
 
         const address = server.httpServer?.address() as AddressInfo;
         const origin = `http://127.0.0.1:${address.port}`;
-        const response = await fetch(
-          `${origin}/api/bitfinex/candles/trade:1m:tBTCUSD/hist?limit=500&sort=-1&end=1699999999999`,
-          {
-            headers: {Origin: origin},
-          },
-        );
+        const response = await fetch(`${origin}/api/bitfinex/${endpoint}?limit=500&sort=-1&end=1699999999999`, {
+          headers: {Origin: origin},
+        });
 
         expect(response.ok).toBe(true);
-        expect(await response.json()).toEqual(candles);
-        expect(requests).toEqual(['/v2/candles/trade:1m:tBTCUSD/hist?limit=500&sort=-1&end=1699999999999']);
+        expect(await response.json()).toEqual(expected);
+        expect(requests).toEqual([`/v2/${endpoint}?limit=500&sort=-1&end=1699999999999`]);
         expect(new URL(response.url).origin).toBe(origin);
       } finally {
         await server.close();

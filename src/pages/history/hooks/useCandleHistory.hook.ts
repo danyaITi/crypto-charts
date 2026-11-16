@@ -1,13 +1,24 @@
 import {MutableRefObject, useEffect, useRef, useState} from 'react';
 import {IChartApi, ISeriesApi, LogicalRange, SeriesDataItemTypeMap} from 'lightweight-charts';
-import {Candle, TimeFrame} from '@pages/history/models';
-import {getCandleData, getVolumeData, isCandleData, mergeCandles} from '@pages/history/utils';
+import {Candle, TimeFrame, Trade} from '@pages/history/models';
+import {
+  createSecondCandleStore,
+  getCandleData,
+  getSecondInterval,
+  getTradeData,
+  getVolumeData,
+  isCandleData,
+  mergeCandles,
+} from '@pages/history/utils';
 import {logger} from '@shared/utils';
 
 const url = 'wss://api-pub.bitfinex.com/ws/2';
 const HISTORY_PAGE_SIZE = 500;
 const HISTORY_THRESHOLD = 50;
 const HISTORY_REQUEST_INTERVAL = 2100;
+const TRADE_HISTORY_PAGE_SIZE = 5000;
+const TRADE_HISTORY_MAX_SIZE = 10000;
+const TRADE_HISTORY_REQUEST_INTERVAL = 4100;
 
 type Props = {
   selectedCurrency: CurrencyType;
@@ -19,7 +30,7 @@ type Props = {
 };
 
 /**
- * Объединяет поток свечей и подгрузку истории при прокрутке к левому краю графика
+ * Объединяет поток свечей или сделок и подгрузку истории при прокрутке к левому краю графика
  */
 export const useCandleHistory = ({
   selectedCurrency,
@@ -47,6 +58,11 @@ export const useCandleHistory = ({
 
     const timeScale = chart.timeScale();
     const ws = new WebSocket(url);
+    const secondInterval = getSecondInterval(selectedTimeFrame);
+    const tradeStore = secondInterval === null ? null : createSecondCandleStore(secondInterval);
+    const requestInterval = tradeStore ? TRADE_HISTORY_REQUEST_INTERVAL : HISTORY_REQUEST_INTERVAL;
+    let tradePageSize = TRADE_HISTORY_PAGE_SIZE;
+    let tradeChannelId: number | null = null;
     let candles: Candle[] = [];
     let isDisposed = false;
     let isFetching = false;
@@ -67,12 +83,27 @@ export const useCandleHistory = ({
 
     /**
      * Обновляет цену и объём, сохраняя участок и масштаб графика
-     * Сдвигает логические индексы на число добавленных слева свечей
+     * Компенсирует сдвиг индексов общих свечей при подгрузке или исправлении старых сделок
      */
     const applyData = (next: Candle[]) => {
       const range = timeScale.getVisibleLogicalRange();
-      const firstTimestamp = candles[0]?.[0];
-      const addedBefore = firstTimestamp === undefined ? 0 : next.filter((candle) => candle[0] < firstTimestamp).length;
+      const nextIndexes = new Map(next.map((candle, index) => [candle[0], index]));
+      // Опирается на свечу рядом с видимой областью: исправления до неё могут удалить любой старый интервал
+      const anchorStart = Math.max(0, Math.min(candles.length - 1, Math.floor(range?.from ?? 0)));
+      let anchorIndex = anchorStart;
+
+      while (anchorIndex < candles.length && !nextIndexes.has(candles[anchorIndex][0])) {
+        anchorIndex += 1;
+      }
+
+      if (anchorIndex >= candles.length) {
+        anchorIndex = anchorStart - 1;
+        while (anchorIndex >= 0 && !nextIndexes.has(candles[anchorIndex][0])) {
+          anchorIndex -= 1;
+        }
+      }
+
+      const shift = anchorIndex < 0 ? 0 : (nextIndexes.get(candles[anchorIndex][0]) ?? anchorIndex) - anchorIndex;
       const hadData = candles.length > 0;
       candles = next;
       isApplyingData = true;
@@ -82,7 +113,7 @@ export const useCandleHistory = ({
         volume.setData(candles.map(getVolumeData));
 
         if (range && hadData) {
-          timeScale.setVisibleLogicalRange({from: range.from + addedBefore, to: range.to + addedBefore});
+          timeScale.setVisibleLogicalRange({from: range.from + shift, to: range.to + shift});
         }
       } finally {
         isApplyingData = false;
@@ -94,7 +125,7 @@ export const useCandleHistory = ({
      * Не допускает параллельных запросов и загрузки после завершения истории
      */
     const loadHistory = () => {
-      if (isDisposed || isFetching || !canLoadMore || !hasSnapshot || candles.length === 0) {
+      if (isDisposed || isFetching || !canLoadMore || !hasSnapshot || (!tradeStore && candles.length === 0)) {
         return;
       }
 
@@ -102,25 +133,29 @@ export const useCandleHistory = ({
       setIsHistoryLoading(true);
 
       /**
-       * Запрашивает свечи строго раньше самой старой загруженной свечи
-       * Проверяет ответ и объединяет его с актуальным кэшем без потери live-обновлений
+       * Для обычных интервалов запрашивает свечи раньше самой старой загруженной
+       * Для секундных догружает сделки с включительной границей, затем пересчитывает OHLC и объём
        */
       const fetchHistory = async () => {
-        const oldestTimestamp = candles[0][0];
+        const oldestTimestamp = tradeStore ? tradeStore.getOldestTimestamp() : candles[0][0] - 1;
         controller = new AbortController();
         lastRequestTime = Date.now();
 
         try {
           const params = new URLSearchParams({
-            limit: String(HISTORY_PAGE_SIZE),
+            limit: String(tradeStore ? tradePageSize : HISTORY_PAGE_SIZE),
             sort: '-1',
-            end: String(oldestTimestamp - 1),
           });
+
+          if (oldestTimestamp !== null) {
+            params.set('end', String(oldestTimestamp));
+          }
+
+          const endpoint = tradeStore
+            ? `trades/${selectedCurrency}/hist`
+            : `candles/trade:${selectedTimeFrame}:${selectedCurrency}/hist`;
           // Запрашивает историю через сервер приложения, поскольку Bitfinex не разрешает прямой браузерный fetch
-          const response = await fetch(
-            `/api/bitfinex/candles/trade:${selectedTimeFrame}:${selectedCurrency}/hist?${params}`,
-            {signal: controller.signal},
-          );
+          const response = await fetch(`/api/bitfinex/${endpoint}?${params}`, {signal: controller.signal});
 
           if (!response.ok) {
             throw new Error(`History request failed: ${response.status}`);
@@ -132,20 +167,52 @@ export const useCandleHistory = ({
             return;
           }
 
-          if (!Array.isArray(data) || !data.every(isCandleData)) {
+          if (!Array.isArray(data)) {
             throw new Error('Invalid candle history response');
           }
 
-          const older = data.filter((candle) => candle[0] < candles[0][0]);
+          if (tradeStore) {
+            const trades = data.map(getTradeData);
 
-          if (older.length === 0) {
-            canLoadMore = false;
-            setHasMoreHistory(false);
-            return;
+            if (!trades.every((trade): trade is Trade => trade !== null)) {
+              throw new Error('Invalid trade history response');
+            }
+
+            // Сохраняет live-исправления и повторно принимает граничную миллисекунду без дублей ID
+            tradeStore.addTrades(
+              trades.filter((trade) => oldestTimestamp === null || trade.timestamp <= oldestTimestamp),
+              false,
+            );
+
+            if (data.length < tradePageSize) {
+              canLoadMore = false;
+              setHasMoreHistory(false);
+            } else if (tradeStore.getOldestTimestamp() === oldestTimestamp) {
+              // Очень плотная миллисекунда может целиком занять страницу: увеличивает лимит без пропуска сделок
+              if (tradePageSize === TRADE_HISTORY_MAX_SIZE) {
+                throw new Error('Too many trades at the history boundary');
+              }
+              tradePageSize = TRADE_HISTORY_MAX_SIZE;
+            }
+
+            applyData(tradeStore.getCandles(!canLoadMore));
+            setIsLoading(false);
+          } else {
+            if (!data.every(isCandleData)) {
+              throw new Error('Invalid candle history response');
+            }
+
+            const older = data.filter((candle) => candle[0] < candles[0][0]);
+
+            if (older.length === 0) {
+              canLoadMore = false;
+              setHasMoreHistory(false);
+              return;
+            }
+
+            // Берёт текущий кэш после ответа, чтобы не потерять WebSocket-обновления за время запроса
+            applyData(mergeCandles(candles, older));
           }
-
-          // Берёт текущий кэш после ответа, чтобы не потерять WebSocket-обновления за время запроса
-          applyData(mergeCandles(candles, older));
           historyError = false;
           setHasHistoryError(false);
         } catch (error) {
@@ -158,13 +225,17 @@ export const useCandleHistory = ({
           if (!isDisposed) {
             isFetching = false;
             setIsHistoryLoading(false);
-            handleVisibleRangeChange(timeScale.getVisibleLogicalRange());
+            if (tradeStore && candles.length === 0 && canLoadMore && !historyError) {
+              loadHistory();
+            } else {
+              handleVisibleRangeChange(timeScale.getVisibleLogicalRange());
+            }
           }
         }
       };
 
       // Ограничивает частоту REST-запросов при быстром скролле и сильном уменьшении масштаба
-      const delay = Math.max(0, HISTORY_REQUEST_INTERVAL - (Date.now() - lastRequestTime));
+      const delay = Math.max(0, requestInterval - (Date.now() - lastRequestTime));
 
       if (delay > 0) {
         requestTimeout = setTimeout(() => void fetchHistory(), delay);
@@ -201,16 +272,61 @@ export const useCandleHistory = ({
       }
     };
 
+    /**
+     * Применяет уникальную сделку к секундным свечам: текущую обновляет быстро, старые исправления — через общий кэш
+     */
+    const updateTradeCandles = (trade: Trade) => {
+      if (!tradeStore) {
+        return;
+      }
+
+      const changed = tradeStore.addTrades([trade]);
+      const lastTimestamp = candles[candles.length - 1]?.[0];
+
+      if (changed.length === 0) {
+        return;
+      }
+
+      if (
+        lastTimestamp === undefined ||
+        changed.some((timestamp) => timestamp < lastTimestamp || !tradeStore.getCandle(timestamp))
+      ) {
+        applyData(tradeStore.getCandles(!canLoadMore));
+        return;
+      }
+
+      changed.forEach((timestamp) => {
+        const candle = tradeStore.getCandle(timestamp);
+
+        if (!candle || (canLoadMore && timestamp === tradeStore.getFirstBucket())) {
+          return;
+        }
+
+        series.update(getCandleData(candle));
+        volume.update(getVolumeData(candle));
+
+        if (candles[candles.length - 1]?.[0] === timestamp) {
+          candles[candles.length - 1] = candle;
+        } else {
+          candles.push(candle);
+        }
+      });
+    };
+
     // Подписывается на свечи выбранной пары и запускает проверку связи
     ws.onopen = () => {
       ws.send(
-        JSON.stringify({event: 'subscribe', channel: 'candles', key: `trade:${selectedTimeFrame}:${selectedCurrency}`}),
+        JSON.stringify(
+          tradeStore
+            ? {event: 'subscribe', channel: 'trades', symbol: selectedCurrency}
+            : {event: 'subscribe', channel: 'candles', key: `trade:${selectedTimeFrame}:${selectedCurrency}`},
+        ),
       );
       heartbeatInterval = setInterval(sendHeartbeat, 30000);
     };
 
     /**
-     * Обрабатывает служебные сообщения, начальный снимок и обновления отдельных свечей
+     * Обрабатывает служебные сообщения, снимки свечей или сделок и live-обновления
      * Снимок дополняет кэш, а текущая свеча обновляется без полной перерисовки истории
      */
     ws.onmessage = (event) => {
@@ -229,6 +345,47 @@ export const useCandleHistory = ({
       if (response?.event === 'pong') {
         clearTimeout(heartbeatTimeout);
         heartbeatTimeout = setTimeout(() => ws.close(), 60000);
+      }
+
+      if (
+        tradeStore &&
+        response?.event === 'subscribed' &&
+        response.channel === 'trades' &&
+        response.symbol === selectedCurrency &&
+        typeof response.chanId === 'number'
+      ) {
+        tradeChannelId = response.chanId;
+        return;
+      }
+
+      if (tradeStore) {
+        if (!Array.isArray(response) || tradeChannelId === null || response[0] !== tradeChannelId) {
+          return;
+        }
+
+        if (Array.isArray(response[1])) {
+          const trades = response[1].map(getTradeData).filter((trade): trade is Trade => trade !== null);
+          tradeStore.addTrades(trades, false);
+          applyData(tradeStore.getCandles(!canLoadMore));
+          const isFirstSnapshot = !hasSnapshot;
+          hasSnapshot = true;
+          setIsLoading(false);
+
+          // Начальный снимок WebSocket невелик; REST даёт достаточно данных для секундного графика
+          if (isFirstSnapshot) {
+            loadHistory();
+          } else {
+            handleVisibleRangeChange(timeScale.getVisibleLogicalRange());
+          }
+        } else if (response[1] === 'te' || response[1] === 'tu') {
+          const trade = getTradeData(response[2]);
+
+          if (trade) {
+            updateTradeCandles(trade);
+          }
+        }
+
+        return;
       }
 
       if (!Array.isArray(response) || !Array.isArray(response[1])) {

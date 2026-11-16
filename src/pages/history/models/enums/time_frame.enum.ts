@@ -1,4 +1,7 @@
 export enum TimeFrame {
+  '1SECOND' = '1s',
+  '5SECOND' = '5s',
+  '10SECOND' = '10s',
   '1MINUTE' = '1m',
   '15MINUTE' = '15m',
   '30MINUTE' = '30m',

@@ -4,6 +4,9 @@ import styles from './styles.module.scss';
 import {TimeFrame} from '@pages/history/models';
 
 const TIME_FRAMES: TimeFrame[] = [
+  TimeFrame['1SECOND'],
+  TimeFrame['5SECOND'],
+  TimeFrame['10SECOND'],
   TimeFrame['1MINUTE'],
   TimeFrame['15MINUTE'],
   TimeFrame['30MINUTE'],
@@ -30,6 +33,8 @@ export const TimeFrames = ({selectedTimeFrame, setSelectedTimeFrame}: Props) => 
       {TIME_FRAMES.map((timeFrame, index) => (
         <Button
           key={index}
+          aria-pressed={selectedTimeFrame === timeFrame}
+          title={timeFrame.endsWith('s') ? 'Секундные свечи из отдельных сделок Bitfinex' : undefined}
           className={classNames(styles.timeFrameButton, {[styles.selected]: selectedTimeFrame === timeFrame})}
           onClick={selectTimeFrameHandler(timeFrame)}>
           {timeFrame}

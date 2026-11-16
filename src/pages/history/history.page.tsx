@@ -15,6 +15,7 @@ import {MarketArea, MenuSeries, TimeFrames, TradesFeed} from '@pages/history/ui'
 import {TimeFrame} from '@pages/history/models';
 import {classNames, getDataSessionStorage, sessionStorageKey, setDataSessionStorage} from '@shared/utils';
 import {useCandleHistory} from '@pages/history/hooks';
+import {getSecondInterval} from '@pages/history/utils';
 
 type DataForSave = {
   selectedTimeFrame: TimeFrame;
@@ -53,6 +54,7 @@ export const HistoryPage = () => {
     additionalLegendText: `${selectedCurrency} ${selectedTimeFrame}`,
     isVolumeVisible,
     volumeUnit: selectedCurrency.slice(1, -3),
+    secondsVisible: getSecondInterval(selectedTimeFrame) !== null,
   });
 
   const {isLoading, isHistoryLoading, hasHistoryError, hasMoreHistory, retryHistory} = useCandleHistory({
