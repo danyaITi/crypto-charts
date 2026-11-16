@@ -11,7 +11,7 @@ import {useEffect, useState} from 'react';
 import {SeriesDataItemTypeMap} from 'lightweight-charts';
 import {Button, Legend, Loader} from '@shared/components';
 
-import {MarketArea, MenuSeries, TimeFrames} from '@pages/history/ui';
+import {MarketArea, MenuSeries, TimeFrames, TradesFeed} from '@pages/history/ui';
 import {TimeFrame} from '@pages/history/models';
 import {classNames, getDataSessionStorage, logger, sessionStorageKey, setDataSessionStorage} from '@shared/utils';
 import {getCandleData, getVolumeData} from '@pages/history/utils';
@@ -45,7 +45,7 @@ export const HistoryPage = () => {
 
   const {ref, mainSeries, volumeSeries, legendRef} = useChart({
     backgroundColor: ChartBackgroundColor.DARK,
-    autoSize: false,
+    autoSize: true,
     gridColor: ChartGridColor.SECONDARY,
     textColor: ChartTextColor.LIGHT,
     borderColor: ChartBorderColor.SECONDARY,
@@ -198,6 +198,8 @@ export const HistoryPage = () => {
           )}
         </div>
       </div>
+
+      <TradesFeed key={selectedCurrency} selectedCurrency={selectedCurrency} />
     </div>
   );
 };
