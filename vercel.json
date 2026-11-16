@@ -1,0 +1,13 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    {
+      "source": "/api/bitfinex/candles/:path*",
+      "destination": "https://api-pub.bitfinex.com/v2/candles/:path*"
+    },
+    {
+      "source": "/api/bitfinex/trades/:path*",
+      "destination": "https://api-pub.bitfinex.com/v2/trades/:path*"
+    }
+  ]
+}
