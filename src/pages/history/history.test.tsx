@@ -52,6 +52,9 @@ const {charts, createChartMock} = vi.hoisted(() => {
 
 vi.mock('lightweight-charts', () => ({createChart: createChartMock}));
 
+// Лента проверяется отдельно, чтобы её соединение не влияло на сценарии графика
+vi.mock('./ui/components/trades_feed', () => ({TradesFeed: () => null}));
+
 class MockWebSocket {
   static OPEN = 1;
   static instances: MockWebSocket[] = [];

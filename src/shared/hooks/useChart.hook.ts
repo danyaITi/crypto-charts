@@ -206,7 +206,10 @@ export const useChart = ({
       });
     }
 
-    window.addEventListener('resize', handleResize);
+    // При autoSize библиотека сама отслеживает размер контейнера через ResizeObserver
+    if (!autoSize) {
+      window.addEventListener('resize', handleResize);
+    }
 
     return () => {
       chart.remove();
