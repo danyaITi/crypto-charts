@@ -1,4 +1,4 @@
-import {createChart, ISeriesApi, SeriesDataItemTypeMap, UTCTimestamp} from 'lightweight-charts';
+import {createChart, IChartApi, ISeriesApi, SeriesDataItemTypeMap, UTCTimestamp} from 'lightweight-charts';
 import {MutableRefObject, useEffect, useRef} from 'react';
 import {
   ChartBackgroundColor,
@@ -11,6 +11,7 @@ import {isOhlcData} from '@shared/utils/type_guards';
 
 type State = {
   ref: MutableRefObject<HTMLDivElement | null>;
+  chartRef: MutableRefObject<IChartApi | null>;
   mainSeries: MutableRefObject<ISeriesApi<keyof SeriesDataItemTypeMap> | null>;
   volumeSeries: MutableRefObject<ISeriesApi<'Histogram'> | null>;
   legendRef: MutableRefObject<HTMLDivElement | null>;
@@ -71,6 +72,7 @@ export const useChart = ({
   volumeUnit = '',
 }: Props): State => {
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
+  const chartRef = useRef<IChartApi | null>(null);
   const legendRef = useRef<HTMLDivElement | null>(null);
   const mainSeries = useRef<ISeriesApi<keyof SeriesDataItemTypeMap> | null>(null);
   const volumeSeries = useRef<ISeriesApi<'Histogram'> | null>(null);
@@ -92,6 +94,7 @@ export const useChart = ({
       },
       autoSize,
     });
+    chartRef.current = chart;
     chart.timeScale().scrollToPosition(5, true);
     chart.timeScale().fitContent();
 
@@ -213,6 +216,7 @@ export const useChart = ({
 
     return () => {
       chart.remove();
+      chartRef.current = null;
       mainSeries.current = null;
       volumeSeries.current = null;
 
@@ -261,6 +265,7 @@ export const useChart = ({
 
   return {
     ref: chartContainerRef,
+    chartRef,
     mainSeries,
     volumeSeries,
     legendRef,
