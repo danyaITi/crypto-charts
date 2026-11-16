@@ -29,6 +29,7 @@ type Props = {
   additionalLegendText?: string;
   isVolumeVisible?: boolean;
   volumeUnit?: string;
+  secondsVisible?: boolean;
   typeSeries?: keyof SeriesDataItemTypeMap;
 };
 
@@ -47,6 +48,7 @@ type Props = {
  * @param [typeSeries] {ChartAvailableTypes} - тип графика
  * @param [isVolumeVisible] {boolean} - показывать ли объём торгов
  * @param [volumeUnit] {string} - валюта измерения объёма торгов
+ * @param [secondsVisible] {boolean} - показывать ли секунды на шкале времени и в подсказке времени
  * 
  * @example {
     backgroundColor: #000,
@@ -70,6 +72,7 @@ export const useChart = ({
   additionalLegendText,
   isVolumeVisible = false,
   volumeUnit = '',
+  secondsVisible = false,
 }: Props): State => {
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -117,6 +120,7 @@ export const useChart = ({
             year: '2-digit',
             hour: '2-digit',
             minute: '2-digit',
+            ...(secondsVisible ? {second: '2-digit'} : {}),
           };
 
           return new Intl.DateTimeFormat(navigator.language, options).format(date);
@@ -126,6 +130,8 @@ export const useChart = ({
 
     chart.timeScale().applyOptions({
       borderColor,
+      timeVisible: true,
+      secondsVisible,
     });
 
     let series: ISeriesApi<keyof SeriesDataItemTypeMap> | null = null;
@@ -234,6 +240,7 @@ export const useChart = ({
     hasLegend,
     additionalLegendText,
     volumeUnit,
+    secondsVisible,
   ]);
 
   // Переключает объём без пересоздания графика и потери загруженных данных
@@ -261,6 +268,7 @@ export const useChart = ({
     hasLegend,
     additionalLegendText,
     volumeUnit,
+    secondsVisible,
   ]);
 
   return {
